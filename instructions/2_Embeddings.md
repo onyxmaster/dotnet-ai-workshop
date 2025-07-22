@@ -91,6 +91,12 @@ Console.WriteLine($"Cat-kitten similarity: {TensorPrimitives.CosineSimilarity(ca
 Console.WriteLine($"Dog-kitten similarity: {TensorPrimitives.CosineSimilarity(dogVector.Span, kittenVector.Span):F2}");
 ```
 
+Be sure to add a using statement at the top of the file:
+
+```csharp
+using System.Numerics.Tensors;
+```
+
 You should see that "cat" is more related to "kitten" than it is to "dog".
 
 ## Semantic search

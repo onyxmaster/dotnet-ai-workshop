@@ -6,7 +6,7 @@ You're going to use FAISS to build an index of many thousands of GitHub issue ti
 
 ## Open the project
 
-Open the project `exercises/Embeddings/Begin`.
+Open the project `exercises/2. Embeddings/Begin`.
 
 In `Program.cs`, ensure only `FaissSemanticSearch` is uncommented:
 
