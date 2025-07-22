@@ -32,7 +32,7 @@ public class FaissSemanticSearch_MacLinux
             var input = Console.ReadLine()!;
             if (input == "") break;
 
-            var inputEmbedding = await EmbeddingGenerator.GenerateEmbeddingVectorAsync(input);
+            var inputEmbedding = await EmbeddingGenerator.GenerateVectorAsync(input);
             var sw = new Stopwatch();
             sw.Start();
             var closest = index.Search(inputEmbedding.ToArray(), 3).ToList();

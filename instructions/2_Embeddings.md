@@ -63,7 +63,7 @@ Leave `SentenceSimilarity` uncommented, because that's where we'll start.
 Open `SentenceSimilarity.cs`. First check you can generate an embedding for some text. Add this at the bottom of the `RunAsync` method:
 
 ```cs
-var embedding = await embeddingGenerator.GenerateEmbeddingVectorAsync("Hello, world!");
+var embedding = await embeddingGenerator.GenerateVectorAsync("Hello, world!");
 Console.WriteLine($"Embedding dimensions: {embedding.Span.Length}");
 foreach (var value in embedding.Span)
 {
@@ -82,9 +82,9 @@ The most commonly used is *cosine similarity*, which gives a number from -1 to 1
 Compute similarity over a few strings as follows:
 
 ```cs
-var catVector = await embeddingGenerator.GenerateEmbeddingVectorAsync("cat");
-var dogVector = await embeddingGenerator.GenerateEmbeddingVectorAsync("dog");
-var kittenVector = await embeddingGenerator.GenerateEmbeddingVectorAsync("kitten");
+var catVector = await embeddingGenerator.GenerateVectorAsync("cat");
+var dogVector = await embeddingGenerator.GenerateVectorAsync("dog");
+var kittenVector = await embeddingGenerator.GenerateVectorAsync("kitten");
 
 Console.WriteLine($"Cat-dog similarity: {TensorPrimitives.CosineSimilarity(catVector.Span, dogVector.Span):F2}");
 Console.WriteLine($"Cat-kitten similarity: {TensorPrimitives.CosineSimilarity(catVector.Span, kittenVector.Span):F2}");
@@ -126,7 +126,7 @@ while (true)
 Replace the `TODO` comment with the following. First compute the embedding of the current `input`:
 
 ```cs
-var inputEmbedding = await embeddingGenerator.GenerateEmbeddingVectorAsync(input);
+var inputEmbedding = await embeddingGenerator.GenerateVectorAsync(input);
 ```
 
 And now loop over all the `titlesWithEmbeddings` candidates. For each one, compute the similarity to the search term, and order by similarity descending:

@@ -272,7 +272,7 @@ Clear out the `AnswerAsync` method body and replace it with:
 ```cs
 // For a simple version of RAG, we'll embed the user's message directly and
 // add the closest few manual chunks to context.
-var userMessageEmbedding = await embeddingGenerator.GenerateEmbeddingVectorAsync(userMessage);
+var userMessageEmbedding = await embeddingGenerator.GenerateVectorAsync(userMessage);
 var closestChunks = await qdrantClient.SearchAsync(
     collectionName: "manuals",
     vector: userMessageEmbedding.ToArray(),

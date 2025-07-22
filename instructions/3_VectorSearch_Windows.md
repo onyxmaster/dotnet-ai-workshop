@@ -72,7 +72,7 @@ while (true)
     var input = Console.ReadLine()!;
     if (input == "") break;
 
-    var inputEmbedding = await EmbeddingGenerator.GenerateEmbeddingVectorAsync(input);
+    var inputEmbedding = await EmbeddingGenerator.GenerateVectorAsync(input);
     var (resultDistances, resultIds) = index.SearchFlat(1, inputEmbedding.ToArray(), 3);
     for (var i = 0; i < resultDistances.Length; i++)
     {
