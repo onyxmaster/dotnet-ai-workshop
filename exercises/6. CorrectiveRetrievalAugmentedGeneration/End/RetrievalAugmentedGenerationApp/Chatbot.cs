@@ -12,32 +12,32 @@ public class Chatbot(
 {
     public async Task StartAsync(CancellationToken cancellationToken)
     {
-        var currentProduct = Helpers.GetCurrentProduct();
-        var thread = new ChatbotThread(chatClient, embeddingGenerator, qdrantClient, currentProduct);
+        var thread = new ChatbotThread(chatClient, embeddingGenerator, qdrantClient);
 
         Console.ForegroundColor = ConsoleColor.Green;
-        Console.WriteLine($"Assistant: Hi! You're looking at the {currentProduct.Model}. What do you want to know about it?");
 
         while (true)
         {
             Console.ForegroundColor = ConsoleColor.White;
-            Console.Write("\nYou: ");
+            Console.Write("\nЗапрос: ");
             var userMessage = Console.ReadLine();
             if (string.IsNullOrWhiteSpace(userMessage))
             {
                 continue;
             }
 
+            Console.ForegroundColor = ConsoleColor.Yellow;
+            Console.WriteLine($"{DateTime.UtcNow:o} отправлено");
             var answer = await thread.AnswerAsync(userMessage, cancellationToken);
 
+            Console.WriteLine($"{DateTime.UtcNow:o} получен ответ");
             Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"Assistant: {answer.Text}\n");
+            Console.WriteLine($"Ответ: {answer.Text}\n");
 
-            // Show citation if given
-            if (answer.Citation is { } citation)
+            Console.ForegroundColor = ConsoleColor.Blue;
+            foreach (var citation in answer.Citations)
             {
-                Console.ForegroundColor = ConsoleColor.DarkGray;
-                Console.WriteLine($"CITATION: {citation.ProductId}.pdf page {citation.PageNumber}: {citation.Quote}");
+                Console.WriteLine($"Источник {citation.SourceId}: {citation.Quote}");
             }
         }
     }

@@ -1,10 +1,9 @@
-﻿using System.ClientModel;
-using Azure.AI.OpenAI;
-using Microsoft.Extensions.AI;
+﻿using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using OpenAI;
 using Qdrant.Client;
 using RetrievalAugmentedGenerationApp;
 
@@ -13,24 +12,17 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddUserSecrets<Program>();
 builder.Services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Warning));
 
-// For GitHub Models or Azure OpenAI:
-IChatClient innerChatClient = new AzureOpenAIClient(new Uri(builder.Configuration["AI:Endpoint"]!), new ApiKeyCredential(builder.Configuration["AI:Key"]!))
-    .GetChatClient("gpt-4o-mini").AsIChatClient();
-
-// Or for OpenAI Platform:
-// var aiConfig = builder.Configuration.GetRequiredSection("AI");
-// var innerChatClient = new OpenAI.Chat.ChatClient("gpt-4o-mini", aiConfig["Key"]!).AsIChatClient();
-
-// Or for Ollama:
-// IChatClient innerChatClient = new OllamaChatClient(new Uri("http://127.0.0.1:11434"), "llama3.1");
+IChatClient innerChatClient = new OpenAI.Chat.ChatClient("RedHatAI/gemma-3-12b-it-quantized.w4a16", new("-"), new() { Endpoint = new("http://127.0.0.1:8000/v1") }).AsIChatClient();
 
 // Register services
 builder.Services.AddHostedService<Chatbot>();
+
 builder.Services.AddEmbeddingGenerator(
-    new OllamaEmbeddingGenerator(new Uri("http://127.0.0.1:11434"), modelId: "all-minilm"));
+    new OpenAI.Embeddings.EmbeddingClient("intfloat/multilingual-e5-large-instruct", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8001/v1") }).AsIEmbeddingGenerator());
 builder.Services.AddSingleton(new QdrantClient("127.0.0.1"));
 builder.Services.AddChatClient(innerChatClient)
-    .UseFunctionInvocation();
+    .UseFunctionInvocation()
+    .UseLogging();
 
 // Go
 await builder.Build().RunAsync();

@@ -9,18 +9,10 @@ namespace RetrievalAugmentedGenerationApp;
 public class ChatbotThread(
     IChatClient chatClient,
     IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator,
-    QdrantClient qdrantClient,
-    Product currentProduct)
+    QdrantClient qdrantClient)
 {
     private List<ChatMessage> _messages =
     [
-        new ChatMessage(ChatRole.System, $"""
-            You are a helpful assistant, here to help customer service staff answer questions they have received from customers.
-            The support staff member is currently answering a question about this product:
-            ProductId: ${currentProduct.ProductId}
-            Brand: ${currentProduct.Brand}
-            Model: ${currentProduct.Model}
-            """),
         /*
         Answer the user question using ONLY information found by searching product manuals.
             If the product manual doesn't contain the information, you should say so. Do not make up information beyond what is
@@ -31,115 +23,84 @@ public class ChatbotThread(
         */
     ];
 
-    public async Task<(string Text, Citation? Citation, string[] AllContext)> AnswerAsync(string userMessage, CancellationToken cancellationToken = default)
+    public async Task<(string Text, Citation[] Citations, string[] AllContext)> AnswerAsync(string userMessage, CancellationToken cancellationToken = default)
     {
-        // For a simple version of RAG, we'll embed the user's message directly and
-        // add the closest few manual chunks to context.
-        var userMessageEmbedding = await embeddingGenerator.GenerateVectorAsync(userMessage, cancellationToken: cancellationToken);
-        var closestChunks = await qdrantClient.SearchAsync(
-            collectionName: "manuals",
-            vector: userMessageEmbedding.ToArray(),
-            filter: Qdrant.Client.Grpc.Conditions.Match("productId", currentProduct.ProductId),
-            limit: 5, cancellationToken: cancellationToken); // TODO: Evaluate with more or less
-        var allContext = closestChunks.Select(c => c.Payload["text"].StringValue).ToArray();
-
-        /*
-        // Log the closest manual chunks for debugging (not using ILogger because we want color)
-        foreach (var chunk in closestChunks)
+        var chatOptions = new ChatOptions
         {
-            Console.ForegroundColor = ConsoleColor.DarkYellow;
-            Console.WriteLine($"[Score: {chunk.Score:F2}, File: {chunk.Payload["productId"].IntegerValue}.pdf, Page: {chunk.Payload["pageNumber"].IntegerValue}");
-            Console.ForegroundColor = ConsoleColor.DarkGray;
-            Console.WriteLine(chunk.Payload["text"].StringValue);
-        }
-        */
+            Tools = [AIFunctionFactory.Create(SearchAsync, "search")],
+            ToolMode = ChatToolMode.RequireSpecific("search"),
+            AllowMultipleToolCalls = true,
+            //Instructions?!
+        };
 
-        // Now ask the chatbot
-        _messages.Add(new(ChatRole.User, $$"""
-            Give an answer using ONLY information from the following product manual extracts.
-            If the product manual doesn't contain the information, you should say so. Do not make up information beyond what is given.
-            Whenever relevant, specify manualExtractId to cite the manual extract that your answer is based on.
-
-            {{string.Join(Environment.NewLine, closestChunks.Select(c => $"<manual_extract id='{c.Id}'>{c.Payload["text"].StringValue}</manual_extract>"))}}
-
-            User question: {{userMessage}}
-            Respond as a JSON object in this format: {
-                "ManualExtractId": numberOrNull,
-                "ManualQuote": stringOrNull, // The relevant verbatim quote from the manual extract, up to 10 words
-                "AnswerText": string
-            }
+        _messages.Clear();
+        _messages.Add(new(ChatRole.System, $$"""
+            You are an intelligent document search and summarization assistant. Your role is to help users answer their questions.            
+            1. First, understand the user's question.
+            2. Using the provided `search` tool, search for relevant information in the knowledge database.
+            3. Once you have retrieved the information, ignore the documents that are not fully relevant to the question.
+            3. Using only the relevant documents, formulate a clear and detailed answer.
+            4. If the retrieved information is insufficient to answer the question, state that you do not have enough information. Do not make up an answer.
+            5. Always respond in Russian language.
             """));
 
-        var response = await chatClient.GetResponseAsync<ChatBotAnswer>(_messages, cancellationToken: cancellationToken);
-        _messages.AddMessages(response);
+        _messages.Add(new(ChatRole.User, $$"""
+            User question: {{userMessage}}
 
+            Respond as a JSON object in this format: {
+                "Sources": [ // The list of the sources used in the answer
+                    {
+                        "Id": string, // The ID of the source that was used
+                        "KeyQuote": string // The most relevant quote from the source, up to 15 words
+                    }
+                ],
+                "IgnoredSources": [ // The list of the ignored sources not used in the answer
+                    {
+                        "Id": string // The ID of the source that was ignored
+                    }
+                ],
+                "Answer": string  // Answer based on the found documents
+            }
+            """));
+        var response = await chatClient.GetResponseAsync<ChatBotAnswer>(_messages, chatOptions, cancellationToken: cancellationToken);
+
+        //_messages.Add(response);
         if (response.TryGetResult(out var answer))
         {
-            // If the chatbot gave a citation, convert it to info to show in the UI
-            var citation = answer.ManualExtractId.HasValue && closestChunks.FirstOrDefault(c => c.Id.Num == (ulong)answer.ManualExtractId) is { } chunk
-                ? new Citation((int)chunk.Payload["productId"].IntegerValue, (int)chunk.Payload["pageNumber"].IntegerValue, answer.ManualQuote ?? "")
-                : default;
+            Citation[] citations = answer.Sources
+                .Select(s => new Citation(s.Id, s.KeyQuote))
+                .Where(s => s is not null)
+                .ToArray()!;
 
-            return (answer.AnswerText, citation, allContext);
+            return (answer.Answer, citations, []);
         }
         else
         {
-            return ("Sorry, there was a problem.", default, allContext);
+            return ("Sorry, there was a problem.", [], []);
         }
-
-        /*
-        var chatOptions = new ChatOptions
-        {
-            Tools = [AIFunctionFactory.Create(ManualSearchAsync)]
-        };
-
-        _messages.Add(new(ChatRole.User, $$"""
-            User question: {{userMessage}}
-            Respond in plain text with your answer. Where possible, also add a citation to the product manual
-            as an XML tag in the form <cite extractId='number' productId='number'>short verbatim quote</cite>.
-            """));
-        var response = await chatClient.GetResponseAsync(_messages, chatOptions, cancellationToken: cancellationToken);
-        _messages.AddMessages(response);
-        var answer = ParseResponse(response.Text);
-
-        // If the chatbot gave a citation, convert it to info to show in the UI
-        var citation = answer.ManualExtractId.HasValue
-            && (await qdrantClient.RetrieveAsync("manuals", (ulong)answer.ManualExtractId.Value)) is { } chunks
-            && chunks.FirstOrDefault() is { } chunk
-            ? new Citation((int)chunk.Payload["productId"].IntegerValue, (int)chunk.Payload["pageNumber"].IntegerValue, answer.ManualQuote ?? "")
-            : default;
-
-        return (answer.AnswerText, citation);
-        */
     }
 
-    [Description("Searches product manuals")]
-    private async Task<SearchResult[]> ManualSearchAsync(
-        [Description("The product ID, or null to search across all products")] int? productIdOrNull,
+    [Description("Searches for information that is relevant to the question")]
+    private async Task<SearchResult[]> SearchAsync(
         [Description("The search phrase or keywords")] string searchPhrase)
     {
-        var searchPhraseEmbedding = (await embeddingGenerator.GenerateAsync([searchPhrase]))[0];
+        Console.WriteLine($"{DateTime.UtcNow:o} агентный запрос: {searchPhrase}");
+        var searchPhraseEmbedding = (await embeddingGenerator.GenerateAsync(["Query: " + searchPhrase]))[0];
         var closestChunks = await qdrantClient.SearchAsync(
             collectionName: "manuals",
             vector: searchPhraseEmbedding.Vector.ToArray(),
-            filter: productIdOrNull is { } productId ? Qdrant.Client.Grpc.Conditions.Match("productId", productId) : (Filter?)default,
-            limit: 5);
-        return closestChunks.Select(c => new SearchResult((int)c.Id.Num, (int)c.Payload["productId"].IntegerValue, c.Payload["text"].StringValue)).ToArray();
-    }
-
-    public record Citation(int ProductId, int PageNumber, string Quote);
-    private record SearchResult(int ManualExtractId, int ProductId, string ManualExtractText);
-    private record ChatBotAnswer(int? ManualExtractId, string? ManualQuote, string AnswerText);
-
-    private static ChatBotAnswer ParseResponse(string text)
-    {
-        var citationRegex = new Regex(@"<cite extractId='(\d+)' productId='\d*'>(.+?)</cite>");
-        if (citationRegex.Match(text) is { Success: true, Groups: var groups } match
-            && int.TryParse(groups[1].ValueSpan, out var extractId))
+            limit: 10);
+        foreach (var result in closestChunks)
         {
-            return new(extractId, groups[2].Value, citationRegex.Replace(text, string.Empty));
+            Console.WriteLine($"{DateTime.UtcNow:o} результат {result.Payload["productId"].StringValue}, вес: {result.Score}, символов: {result.Payload["text"].StringValue.Length}");
         }
 
-        return new(default, default, text);
+        return closestChunks.Select(c => new SearchResult(c.Payload["productId"].StringValue, c.Payload["text"].StringValue)).ToArray();
     }
+
+    public record Citation(string SourceId, string Quote);
+    private record SearchResult(string SourceId, string Text);
+    private record ChatBotAnswer(ChatBotAnswerSource[] Sources, ChatBotAnswerIgnoredSource[] IgnoredSources, string Answer);
+    private record ChatBotAnswerSource(string Id, string KeyQuote);
+    private record ChatBotAnswerIgnoredSource(string Id);
 }
