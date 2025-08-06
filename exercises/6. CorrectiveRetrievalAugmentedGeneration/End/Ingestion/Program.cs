@@ -40,17 +40,17 @@ static class Program
             return count;
         };
 
-        const string Prefix = "passage: ";
+        const string Prefix = "query: ";
         IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator =
             new OpenAI.Embeddings.EmbeddingClient("intfloat/multilingual-e5-large", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8001/v1") }).AsIEmbeddingGenerator();
 
         var qdrantClient = new Qdrant.Client.QdrantClient("procyon10.bru");
-        if (await qdrantClient.CollectionExistsAsync("docs"))
-        {
-            await qdrantClient.DeleteCollectionAsync("docs");
-        }
+        //if (await qdrantClient.CollectionExistsAsync("docs"))
+        //{
+        //    await qdrantClient.DeleteCollectionAsync("docs");
+        //}
 
-        await qdrantClient.CreateCollectionAsync("docs", new VectorParams { Size = 1024, Distance = Distance.Cosine });
+        //await qdrantClient.CreateCollectionAsync("docs", new VectorParams { Size = 1024, Distance = Distance.Cosine });
 
         var dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../data/content"));
         const int ContextLength = 512;
@@ -62,72 +62,23 @@ static class Program
         var pageLines = new List<string>();
         var docIdsBatch = new List<string>();
         var paragraphsBatch = new List<string>();
+        var index = 0;
         var timer = Stopwatch.StartNew();
-        foreach (var filePath in Directory.EnumerateFiles(dir, "*.txt.gz"))
+        foreach (var filePath in Directory.EnumerateFiles(dir, "*.csv"))
         {
             var bytePool = ArrayPool<byte>.Shared;
             var charPool = ArrayPool<char>.Shared;
-            using var stream = new GZipStream(File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read), CompressionMode.Decompress);
-            while (true)
+            using var stream = File.OpenText(filePath);
+            while (stream.ReadLine() is { } line)
             {
-                Span<byte> lengthBuffer = stackalloc byte[4];
-                try
-                {
-                    stream.ReadExactly(lengthBuffer);
-                }
-                catch (EndOfStreamException)
-                {
-                    break;
-                }
-
-                var length = BitConverter.ToInt32(lengthBuffer);
-                var contentBuffer = bytePool.Rent(length);
-                var contentSpan = contentBuffer.AsSpan(0, length);
-                stream.ReadExactly(contentSpan);
-                var charBuffer = charPool.Rent(length);
-                var contentLength = Encoding.UTF8.GetChars(contentSpan, charBuffer);
-                bytePool.Return(contentBuffer);
-
                 pageLines.Clear();
-                string? docId = null;
-                string? prefix = null;
-                var text = charBuffer.AsSpan(0, contentLength);
-                while (!text.IsEmpty)
-                {
-                    int idx = text.IndexOf('\n');
-                    if (idx == -1)
-                    {
-                        pageLines.Add(text.ToString());
-                        totalLength += text.Length;
-                        break;
-                    }
+                totalLength += line.Length;
+                pageLines.Add(line);
 
-                    if (idx != 0)
-                    {
-                        var line = text.Slice(0, idx).ToString();
-                        if (docId is null)
-                        {
-                            docId = line;
-                        }
-                        else if (prefix is null)
-                        {
-                            prefix = line;
-                        }
-                        else
-                        {
-                            pageLines.Add(line);
-                        }
-
-                        totalLength += idx;
-                    }
-
-                    text = text.Slice(idx + 1);
-                }
-
-                charPool.Return(charBuffer);
+                string? docId = $"q_{index++}";
                 ++count;
 
-                if (docId is null || prefix is null)
+                if (docId is null)
                 {
                     throw new InvalidDataException("Missing doc ID and/or prefix.");
                 }
@@ -137,7 +88,7 @@ static class Program
                     continue;
                 }
 
-                prefix = Prefix + prefix;
+                var prefix = Prefix;
                 // TextChunker.SplitPlainTextParagraphs does not appear to reliably handle chunk header length (it has the code, but it fails)
                 var adjustedContextLength = ContextLength - xlmrTokenCounter(prefix);
                 if (adjustedContextLength <= 0)
@@ -179,6 +130,8 @@ static class Program
                 tasks.Add(Process(processDocIds, processParagraphs));
             }
         }
+
+        tasks.Add(Process(docIdsBatch.ToArray(), paragraphsBatch.ToArray()));
 
         await Task.WhenAll(tasks);
         Console.WriteLine($"Processed {count} files, {totalLength} chars, {totalLength / timer.Elapsed.TotalSeconds} chars/s, took {timer.Elapsed}");
