@@ -199,7 +199,7 @@ static class Program
                     Payload =
                     {
                         ["text"] = paragraphs[index].Substring(Prefix.Length),
-                        ["id"] = docId,
+                        ["docId"] = docId,
                     }
                 };
                 ++index;
