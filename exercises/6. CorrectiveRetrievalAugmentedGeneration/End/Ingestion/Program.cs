@@ -45,12 +45,12 @@ static class Program
             new OpenAI.Embeddings.EmbeddingClient("intfloat/multilingual-e5-large", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8001/v1") }).AsIEmbeddingGenerator();
 
         var qdrantClient = new Qdrant.Client.QdrantClient("procyon10.bru");
-        if (await qdrantClient.CollectionExistsAsync("docs"))
-        {
-            await qdrantClient.DeleteCollectionAsync("docs");
-        }
+        //if (await qdrantClient.CollectionExistsAsync("docs"))
+        //{
+        //    await qdrantClient.DeleteCollectionAsync("docs");
+        //}
 
-        await qdrantClient.CreateCollectionAsync("docs", new VectorParams { Size = 1024, Distance = Distance.Cosine });
+        //await qdrantClient.CreateCollectionAsync("docs", new VectorParams { Size = 1024, Distance = Distance.Cosine });
 
         var dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../data/content"));
         const int ContextLength = 512;
