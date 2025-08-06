@@ -1,6 +1,5 @@
 ﻿using System.Buffers;
 using System.Diagnostics;
-using System.IO.Compression;
 using System.Text;
 using BlingFire;
 using Microsoft.Extensions.AI;
@@ -9,8 +8,6 @@ using Qdrant.Client.Grpc;
 
 static class Program
 {
-    static ulong _pointId;
-
     static async Task Main()
     {
         // - Qdrant in Docker (e.g., `docker run -p 6333:6333 -p 6334:6334 -v qdrant_storage:/qdrant/storage:z -d qdrant/qdrant`)
@@ -140,14 +137,13 @@ static class Program
         {
             var task = embeddingGenerator.GenerateAsync(paragraphs);
             var points = new PointStruct[paragraphs.Length];
-            var id = Interlocked.Add(ref _pointId, (ulong)paragraphs.Length);
             var embeddings = await task;
             var index = 0;
             foreach (var docId in docIds)
             {
                 points[index] = new()
                 {
-                    Id = --id,
+                    Id = new(Guid.NewGuid()),
                     Vectors = embeddings[index].Vector.ToArray(),
                     Payload =
                     {
