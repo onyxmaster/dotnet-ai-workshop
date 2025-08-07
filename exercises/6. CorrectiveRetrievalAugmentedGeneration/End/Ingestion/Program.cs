@@ -40,7 +40,7 @@ static class Program
             return count;
         };
 
-        const string Prefix = "passage: ";
+        const string CollectionName = "docs-bge-m3";
         IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator =
             new OpenAI.Embeddings.EmbeddingClient("intfloat/multilingual-e5-large", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8001/v1") }).AsIEmbeddingGenerator();
 
@@ -112,7 +112,7 @@ static class Program
                         }
                         else if (prefix is null)
                         {
-                            prefix = line;
+                            prefix = line + "\n";
                         }
                         else
                         {
@@ -146,15 +146,16 @@ static class Program
                     throw new InvalidDataException($"Skipping {filePath} due to prefix length exceeding context length.");
                 }
 
-                var paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 8, chunkHeader: prefix, tokenCounter: xlmrTokenCounter);
+                var paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 8, chunkHeader: Prefix + prefix, tokenCounter: xlmrTokenCounter);
 
                 // SplitPlainTextParagraphs has a bug that merges paragraphs that are too long, so we need to check if any paragraph exceeds the adjusted context length
                 if (paragraphs.Any(p => xlmrTokenCounter(p) > adjustedContextLength))
                 {
-                    paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 4, chunkHeader: prefix, tokenCounter: xlmrTokenCounter);
+                    paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 4, chunkHeader: Prefix + prefix, tokenCounter: xlmrTokenCounter);
                 }
 
                 paragraphsBatch.AddRange(paragraphs);
+                var content = string.Join("\n", pageLines);
                 for (var i = 0; i < paragraphs.Count; i++)
                 {
                     docIdsBatch.Add(docId);
@@ -185,7 +186,7 @@ static class Program
         await Task.WhenAll(tasks);
         Console.WriteLine($"Processed {count} files, {totalLength} chars, {totalLength / timer.Elapsed.TotalSeconds} chars/s, took {timer.Elapsed}");
 
-        async Task Process(string[] docIds, string[] paragraphs)
+        async Task Process((string, string)[] docIds, string[] paragraphs)
         {
             var task = embeddingGenerator.GenerateAsync(paragraphs);
             var points = new PointStruct[paragraphs.Length];
@@ -201,7 +202,7 @@ static class Program
             }
 
             var index = 0;
-            foreach (var docId in docIds)
+            foreach (var (docId, content) in docIds)
             {
                 points[index] = new()
                 {
@@ -211,6 +212,7 @@ static class Program
                     {
                         ["text"] = paragraphs[index].Substring(Prefix.Length),
                         ["docId"] = docId,
+                        ["content"] = content,
                     }
                 };
                 ++index;
