@@ -137,7 +137,7 @@ static class Program
                     continue;
                 }
 
-                prefix = Prefix + prefix;
+                prefix = Prefix + prefix + "\n";
                 // TextChunker.SplitPlainTextParagraphs does not appear to reliably handle chunk header length (it has the code, but it fails)
                 var adjustedContextLength = ContextLength - xlmrTokenCounter(prefix);
                 if (adjustedContextLength <= 0)
