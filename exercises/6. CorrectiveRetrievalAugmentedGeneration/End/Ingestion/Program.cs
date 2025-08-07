@@ -189,7 +189,16 @@ static class Program
             var task = embeddingGenerator.GenerateAsync(paragraphs);
             var points = new PointStruct[paragraphs.Length];
             var id = Interlocked.Add(ref _pointId, (ulong)paragraphs.Length);
-            var embeddings = await task;
+            GeneratedEmbeddings<Embedding<float>> embeddings;
+            try
+            {
+                embeddings = await task;
+            }
+            catch
+            {
+                return;
+            }
+
             var index = 0;
             foreach (var docId in docIds)
             {
