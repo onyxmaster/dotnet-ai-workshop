@@ -42,7 +42,7 @@ static class Program
 
         const string CollectionName = "docs-bge-m3";
         IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator =
-            new OpenAI.Embeddings.EmbeddingClient("intfloat/multilingual-e5-large", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8001/v1") }).AsIEmbeddingGenerator();
+            new OpenAI.Embeddings.EmbeddingClient("BAAI/bge-m3", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8001/v1") }).AsIEmbeddingGenerator();
 
         var qdrantClient = new Qdrant.Client.QdrantClient("procyon10.bru");
         //if (await qdrantClient.CollectionExistsAsync("docs"))
@@ -61,7 +61,7 @@ static class Program
         var count = 0;
         var totalLength = 0L;
         var pageLines = new List<string>();
-        var docIdsBatch = new List<string>();
+        var docIdsBatch = new List<(string, string)>();
         var paragraphsBatch = new List<string>();
         var timer = Stopwatch.StartNew();
         foreach (var filePath in Directory.EnumerateFiles(dir, "*.txt.gz"))
@@ -138,7 +138,6 @@ static class Program
                     continue;
                 }
 
-                prefix = Prefix + prefix + "\n";
                 // TextChunker.SplitPlainTextParagraphs does not appear to reliably handle chunk header length (it has the code, but it fails)
                 var adjustedContextLength = ContextLength - xlmrTokenCounter(prefix);
                 if (adjustedContextLength <= 0)
@@ -158,7 +157,7 @@ static class Program
                 var content = string.Join("\n", pageLines);
                 for (var i = 0; i < paragraphs.Count; i++)
                 {
-                    docIdsBatch.Add(docId);
+                    docIdsBatch.Add((docId, prefix + content));
                 }
 
                 if (paragraphsBatch.Count < 100)
