@@ -181,6 +181,7 @@ static class Program
             }
         }
 
+        tasks.Add(Process(docIdsBatch.ToArray(), paragraphsBatch.ToArray()));
         await Task.WhenAll(tasks);
         Console.WriteLine($"Processed {count} files, {totalLength} chars, {totalLength / timer.Elapsed.TotalSeconds} chars/s, took {timer.Elapsed}");
 
