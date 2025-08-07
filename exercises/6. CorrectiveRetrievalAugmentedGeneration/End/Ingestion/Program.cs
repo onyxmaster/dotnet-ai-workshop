@@ -46,11 +46,12 @@ static class Program
 
         var qdrantClient = new Qdrant.Client.QdrantClient("procyon10.bru");
         //if (await qdrantClient.CollectionExistsAsync("docs"))
+        //if (await qdrantClient.CollectionExistsAsync(CollectionName))
         //{
-        //    await qdrantClient.DeleteCollectionAsync("docs");
+        //    await qdrantClient.DeleteCollectionAsync(CollectionName);
         //}
 
-        //await qdrantClient.CreateCollectionAsync("docs", new VectorParams { Size = 1024, Distance = Distance.Cosine });
+        //await qdrantClient.CreateCollectionAsync(CollectionName, new VectorParams { Size = 1024, Distance = Distance.Cosine });
 
         var dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../data/content"));
         const int ContextLength = 512;
@@ -205,7 +206,7 @@ static class Program
                 ++index;
             }
 
-            await qdrantClient.UpsertAsync("docs", points);
+            await qdrantClient.UpsertAsync(CollectionName, points);
         }
     }
 }
