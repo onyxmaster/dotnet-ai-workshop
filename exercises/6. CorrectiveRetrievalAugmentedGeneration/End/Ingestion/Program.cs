@@ -8,6 +8,8 @@ using Qdrant.Client.Grpc;
 
 static class Program
 {
+    static ulong _pointId;
+
     static async Task Main()
     {
         // - Qdrant in Docker (e.g., `docker run -p 6333:6333 -p 6334:6334 -v qdrant_storage:/qdrant/storage:z -d qdrant/qdrant`)
@@ -39,27 +41,25 @@ static class Program
 
         const string Prefix = "query: ";
         IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator =
-            new OpenAI.Embeddings.EmbeddingClient("intfloat/multilingual-e5-large", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8001/v1") }).AsIEmbeddingGenerator();
+            new OpenAI.Embeddings.EmbeddingClient("intfloat/multilingual-e5-large", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8000/v1") }).AsIEmbeddingGenerator();
 
+        _pointId = 10_000_000_000UL;
         var qdrantClient = new Qdrant.Client.QdrantClient("procyon10.bru");
-        //if (await qdrantClient.CollectionExistsAsync("docs"))
+        const string CollectionName = "queries";
+        //if (await qdrantClient.CollectionExistsAsync(CollectionName))
         //{
-        //    await qdrantClient.DeleteCollectionAsync("docs");
+        //    await qdrantClient.DeleteCollectionAsync(CollectionName);
         //}
 
-        //await qdrantClient.CreateCollectionAsync("docs", new VectorParams { Size = 1024, Distance = Distance.Cosine });
+        //await qdrantClient.CreateCollectionAsync(CollectionName, new VectorParams { Size = 1024, Distance = Distance.Cosine });
 
         var dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../data/content"));
-        const int ContextLength = 512;
 
         const int Parallelism = 4;
         var tasks = new List<Task>(Parallelism);
         var count = 0;
-        var totalLength = 0L;
-        var pageLines = new List<string>();
         var docIdsBatch = new List<string>();
         var paragraphsBatch = new List<string>();
-        var index = 0;
         var timer = Stopwatch.StartNew();
         foreach (var filePath in Directory.EnumerateFiles(dir, "*.csv"))
         {
@@ -68,51 +68,16 @@ static class Program
             using var stream = File.OpenText(filePath);
             while (stream.ReadLine() is { } line)
             {
-                pageLines.Clear();
-                totalLength += line.Length;
-                pageLines.Add(line);
+                paragraphsBatch.Add(Prefix + line);
+                docIdsBatch.Add($"q_{count}");
 
-                string? docId = $"q_{index++}";
                 ++count;
-
-                if (docId is null)
-                {
-                    throw new InvalidDataException("Missing doc ID and/or prefix.");
-                }
-
-                if (pageLines.Count == 0)
+                if (paragraphsBatch.Count < 128)
                 {
                     continue;
                 }
 
-                var prefix = Prefix;
-                // TextChunker.SplitPlainTextParagraphs does not appear to reliably handle chunk header length (it has the code, but it fails)
-                var adjustedContextLength = ContextLength - xlmrTokenCounter(prefix);
-                if (adjustedContextLength <= 0)
-                {
-                    throw new InvalidDataException($"Skipping {filePath} due to prefix length exceeding context length.");
-                }
-
-                var paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 8, chunkHeader: prefix, tokenCounter: xlmrTokenCounter);
-
-                // SplitPlainTextParagraphs has a bug that merges paragraphs that are too long, so we need to check if any paragraph exceeds the adjusted context length
-                if (paragraphs.Any(p => xlmrTokenCounter(p) > adjustedContextLength))
-                {
-                    paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 4, chunkHeader: prefix, tokenCounter: xlmrTokenCounter);
-                }
-
-                paragraphsBatch.AddRange(paragraphs);
-                for (var i = 0; i < paragraphs.Count; i++)
-                {
-                    docIdsBatch.Add(docId);
-                }
-
-                if (paragraphsBatch.Count < 100)
-                {
-                    continue;
-                }
-
-                Console.WriteLine($"Processed {count} files, {totalLength} chars, {count / timer.Elapsed.TotalSeconds} files/s, {totalLength / timer.Elapsed.TotalSeconds} chars/s");
+                Console.WriteLine($"Processed {count} queries, {count / timer.Elapsed.TotalSeconds} q/s");
                 var processDocIds = docIdsBatch.ToArray();
                 docIdsBatch.Clear();
                 var processParagraphs = paragraphsBatch.ToArray();
@@ -131,19 +96,20 @@ static class Program
         tasks.Add(Process(docIdsBatch.ToArray(), paragraphsBatch.ToArray()));
 
         await Task.WhenAll(tasks);
-        Console.WriteLine($"Processed {count} files, {totalLength} chars, {totalLength / timer.Elapsed.TotalSeconds} chars/s, took {timer.Elapsed}");
+        Console.WriteLine($"Processed {count} queries, {count / timer.Elapsed.TotalSeconds} q/s");
 
         async Task Process(string[] docIds, string[] paragraphs)
         {
             var task = embeddingGenerator.GenerateAsync(paragraphs);
             var points = new PointStruct[paragraphs.Length];
+            var id = Interlocked.Add(ref _pointId, (ulong)paragraphs.Length);
             var embeddings = await task;
             var index = 0;
             foreach (var docId in docIds)
             {
                 points[index] = new()
                 {
-                    Id = new(Guid.NewGuid()),
+                    Id = --id,
                     Vectors = embeddings[index].Vector.ToArray(),
                     Payload =
                     {
@@ -154,7 +120,7 @@ static class Program
                 ++index;
             }
 
-            await qdrantClient.UpsertAsync("docs", points);
+            await qdrantClient.UpsertAsync(CollectionName, points);
         }
     }
 }
