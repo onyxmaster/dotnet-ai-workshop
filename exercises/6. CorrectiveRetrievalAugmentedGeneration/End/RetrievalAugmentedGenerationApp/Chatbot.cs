@@ -1,4 +1,7 @@
-﻿using Microsoft.Extensions.AI;
+﻿using System.Diagnostics;
+using System.Globalization;
+using CsvHelper;
+using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Hosting;
 using Qdrant.Client;
 
@@ -14,31 +17,60 @@ public class Chatbot(
     {
         var thread = new ChatbotThread(chatClient, embeddingGenerator, qdrantClient);
 
-        Console.ForegroundColor = ConsoleColor.Green;
-
-        while (true)
+        using var csv = new CsvReader(File.OpenText("./../../../../../data/content/QdrantResults-BGE.csv"), System.Globalization.CultureInfo.InvariantCulture);
+        var header = true;
+        var relevanceMap = new Dictionary<int, int>();
+        const int Parallelism = 3;
+        var tasks = new List<Task>(Parallelism);
+        var timer = Stopwatch.StartNew();
+        while (csv.Read())
         {
-            Console.ForegroundColor = ConsoleColor.White;
-            Console.Write("\nЗапрос: ");
-            var userMessage = Console.ReadLine();
-            if (string.IsNullOrWhiteSpace(userMessage))
+            if (header)
             {
+                header = false;
                 continue;
             }
 
-            Console.ForegroundColor = ConsoleColor.Yellow;
-            Console.WriteLine($"{DateTime.UtcNow:o} отправлено");
-            var answer = await thread.AnswerAsync(userMessage, cancellationToken);
-
-            Console.WriteLine($"{DateTime.UtcNow:o} получен ответ");
-            Console.ForegroundColor = ConsoleColor.Green;
-            Console.WriteLine($"Ответ: {answer.Text}\n");
-
-            Console.ForegroundColor = ConsoleColor.Blue;
-            foreach (var citation in answer.Citations)
+            var num = int.Parse(csv[0]!, NumberFormatInfo.InvariantInfo);
+            var query = csv[1]!;
+            var doc = csv[3]!;
+            while (tasks.Count >= Parallelism)
             {
-                Console.WriteLine($"Источник {citation.SourceId}: {citation.Quote}");
+                var completedTask = await Task.WhenAny(tasks);
+                tasks.Remove(completedTask);
+                await completedTask;
             }
+
+            tasks.Add(Process(num, query, doc));
+            if (num % 100 == 0)
+            {
+                Console.Error.WriteLine($"Processed {num} queries, {num / timer.Elapsed.TotalSeconds} q/s");
+            }
+
+            //if (num == 1000)
+            //{
+            //    break;
+            //}
+        }
+
+        await Task.WhenAll(tasks);
+
+        Console.WriteLine();
+        foreach (var item in relevanceMap.OrderBy(kvp => kvp.Key))
+        {
+            Console.WriteLine($"{item.Key}: {item.Value}");
+        }
+
+        async Task Process(int num, string query, string doc)
+        {
+            var relevance = await thread.AnswerAsync(query, doc, cancellationToken);
+            lock (relevanceMap)
+            {
+                relevanceMap.TryGetValue(relevance, out var count);
+                relevanceMap[relevance] = count + 1;
+            }
+
+            Console.WriteLine($"{num},{relevance}");
         }
     }
 

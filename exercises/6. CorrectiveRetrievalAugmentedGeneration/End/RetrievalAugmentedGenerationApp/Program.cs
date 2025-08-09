@@ -12,7 +12,7 @@ var builder = Host.CreateApplicationBuilder(args);
 builder.Configuration.AddUserSecrets<Program>();
 builder.Services.AddLogging(builder => builder.AddConsole().SetMinimumLevel(LogLevel.Warning));
 
-IChatClient innerChatClient = new OpenAI.Chat.ChatClient("RedHatAI/gemma-3-12b-it-quantized.w4a16", new("-"), new() { Endpoint = new("http://127.0.0.1:8000/v1") }).AsIChatClient();
+IChatClient innerChatClient = new OpenAI.Chat.ChatClient("RedHatAI/gemma-3-12b-it-quantized.w4a16", new("-"), new() { Endpoint = new("http://127.0.0.1:8080/v1") }).AsIChatClient();
 
 // Register services
 builder.Services.AddHostedService<Chatbot>();
