@@ -40,12 +40,11 @@ static class Program
             return count;
         };
 
-        const string CollectionName = "docs-bge-m3";
+        const string CollectionName = "docs-e5-large-test";
         IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator =
-            new OpenAI.Embeddings.EmbeddingClient("BAAI/bge-m3", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8001/v1") }).AsIEmbeddingGenerator();
+            new OpenAI.Embeddings.EmbeddingClient("intfloat/multilingual-e5-large", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8000/v1") }).AsIEmbeddingGenerator();
 
         var qdrantClient = new Qdrant.Client.QdrantClient("procyon10.bru");
-        //if (await qdrantClient.CollectionExistsAsync("docs"))
         //if (await qdrantClient.CollectionExistsAsync(CollectionName))
         //{
         //    await qdrantClient.DeleteCollectionAsync(CollectionName);
@@ -55,23 +54,23 @@ static class Program
 
         var dir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, "../../../../../data/content"));
         const int ContextLength = 512;
-
+        const string Prefix = "passage: ";
         const int Parallelism = 4;
         var tasks = new List<Task>(Parallelism);
         var count = 0;
-        var totalLength = 0L;
+        var chunkCount = 0;
         var pageLines = new List<string>();
         var docIdsBatch = new List<(string, string)>();
         var paragraphsBatch = new List<string>();
+        var lengthBuffer = new byte[4];
         var timer = Stopwatch.StartNew();
         foreach (var filePath in Directory.EnumerateFiles(dir, "*.txt.gz"))
         {
             var bytePool = ArrayPool<byte>.Shared;
             var charPool = ArrayPool<char>.Shared;
-            using var stream = new GZipStream(File.Open(filePath, FileMode.Open, FileAccess.Read, FileShare.Read), CompressionMode.Decompress);
+            using var stream = new GZipStream(new FileStream(filePath, FileMode.Open, FileAccess.Read, FileShare.Read, 65536, FileOptions.SequentialScan), CompressionMode.Decompress);
             while (true)
             {
-                Span<byte> lengthBuffer = stackalloc byte[4];
                 try
                 {
                     stream.ReadExactly(lengthBuffer);
@@ -99,7 +98,6 @@ static class Program
                     if (idx == -1)
                     {
                         pageLines.Add(text.ToString());
-                        totalLength += text.Length;
                         break;
                     }
 
@@ -112,60 +110,58 @@ static class Program
                         }
                         else if (prefix is null)
                         {
-                            prefix = line + "\n";
+                            prefix = line;
                         }
                         else
                         {
                             pageLines.Add(line);
                         }
-
-                        totalLength += idx;
                     }
 
                     text = text.Slice(idx + 1);
                 }
 
                 charPool.Return(charBuffer);
-                ++count;
-
                 if (docId is null || prefix is null)
                 {
                     throw new InvalidDataException("Missing doc ID and/or prefix.");
                 }
 
-                if (pageLines.Count == 0)
+                ++count;
+                var chunkHeader = Prefix + prefix + "\n";
+                if (pageLines.Count != 0)
+                {
+                    // BlingFireUtils isn't too good at sampling
+                    var adjustedContextLength = ContextLength * 8 / 9;
+                    var paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 8, chunkHeader: chunkHeader, tokenCounter: xlmrTokenCounter);
+
+                    // SplitPlainTextParagraphs has a bug that merges paragraphs that are too long, so we need to check if any paragraph exceeds the adjusted context length
+                    if (paragraphs.Any(p => p.Length > adjustedContextLength && xlmrTokenCounter(p) > adjustedContextLength))
+                    {
+                        paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 4, chunkHeader: chunkHeader, tokenCounter: xlmrTokenCounter);
+                    }
+
+                    paragraphsBatch.AddRange(paragraphs);
+                    var content = prefix + "\n" + string.Join("\n", pageLines);
+                    for (var i = 0; i < paragraphs.Count; i++)
+                    {
+                        docIdsBatch.Add((docId, prefix));
+                    }
+                }
+                else
+                {
+                    paragraphsBatch.Add(chunkHeader);
+                    docIdsBatch.Add((docId, prefix));
+                }
+
+
+                if (paragraphsBatch.Count < 128)
                 {
                     continue;
                 }
 
-                // TextChunker.SplitPlainTextParagraphs does not appear to reliably handle chunk header length (it has the code, but it fails)
-                var adjustedContextLength = ContextLength - xlmrTokenCounter(prefix);
-                if (adjustedContextLength <= 0)
-                {
-                    throw new InvalidDataException($"Skipping {filePath} due to prefix length exceeding context length.");
-                }
-
-                var paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 8, chunkHeader: Prefix + prefix, tokenCounter: xlmrTokenCounter);
-
-                // SplitPlainTextParagraphs has a bug that merges paragraphs that are too long, so we need to check if any paragraph exceeds the adjusted context length
-                if (paragraphs.Any(p => xlmrTokenCounter(p) > adjustedContextLength))
-                {
-                    paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 4, chunkHeader: Prefix + prefix, tokenCounter: xlmrTokenCounter);
-                }
-
-                paragraphsBatch.AddRange(paragraphs);
-                var content = string.Join("\n", pageLines);
-                for (var i = 0; i < paragraphs.Count; i++)
-                {
-                    docIdsBatch.Add((docId, prefix + content));
-                }
-
-                if (paragraphsBatch.Count < 100)
-                {
-                    continue;
-                }
-
-                Console.WriteLine($"Processed {count} files, {totalLength} chars, {count / timer.Elapsed.TotalSeconds} files/s, {totalLength / timer.Elapsed.TotalSeconds} chars/s");
+                chunkCount += paragraphsBatch.Count;
+                Console.WriteLine($"Processed {count} files, chunks: {chunkCount}, {count / timer.Elapsed.TotalSeconds} records/s");
                 var processDocIds = docIdsBatch.ToArray();
                 docIdsBatch.Clear();
                 var processParagraphs = paragraphsBatch.ToArray();
@@ -181,9 +177,10 @@ static class Program
             }
         }
 
+        chunkCount += paragraphsBatch.Count;
         tasks.Add(Process(docIdsBatch.ToArray(), paragraphsBatch.ToArray()));
         await Task.WhenAll(tasks);
-        Console.WriteLine($"Processed {count} files, {totalLength} chars, {totalLength / timer.Elapsed.TotalSeconds} chars/s, took {timer.Elapsed}");
+        Console.WriteLine($"Processed {count} files, chunks: {chunkCount}, {count / timer.Elapsed.TotalSeconds} records/s, took {timer.Elapsed}");
 
         async Task Process((string, string)[] docIds, string[] paragraphs)
         {
@@ -197,6 +194,7 @@ static class Program
             }
             catch
             {
+                Console.Error.WriteLine("Failure detected.");
                 return;
             }
 
