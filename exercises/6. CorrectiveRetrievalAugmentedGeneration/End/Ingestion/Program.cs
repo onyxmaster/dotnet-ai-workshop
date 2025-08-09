@@ -8,8 +8,6 @@ using Qdrant.Client.Grpc;
 
 static class Program
 {
-    static ulong _pointId;
-
     static async Task Main()
     {
         // - Qdrant in Docker (e.g., `docker run -p 6333:6333 -p 6334:6334 -v qdrant_storage:/qdrant/storage:z -d qdrant/qdrant`)
@@ -43,7 +41,6 @@ static class Program
         IEmbeddingGenerator<string, Embedding<float>> embeddingGenerator =
             new OpenAI.Embeddings.EmbeddingClient("intfloat/multilingual-e5-large", new("-"), new() { Endpoint = new Uri("http://127.0.0.1:8000/v1") }).AsIEmbeddingGenerator();
 
-        _pointId = 10_000_000_000UL;
         var qdrantClient = new Qdrant.Client.QdrantClient("procyon10.bru");
         const string CollectionName = "queries";
         //if (await qdrantClient.CollectionExistsAsync(CollectionName))
@@ -58,7 +55,7 @@ static class Program
         const int Parallelism = 4;
         var tasks = new List<Task>(Parallelism);
         var count = 0;
-        var docIdsBatch = new List<string>();
+        var docIdsBatch = new List<int>();
         var paragraphsBatch = new List<string>();
         var timer = Stopwatch.StartNew();
         foreach (var filePath in Directory.EnumerateFiles(dir, "*.csv"))
@@ -66,10 +63,11 @@ static class Program
             var bytePool = ArrayPool<byte>.Shared;
             var charPool = ArrayPool<char>.Shared;
             using var stream = File.OpenText(filePath);
+            stream.ReadLine();
             while (stream.ReadLine() is { } line)
             {
                 paragraphsBatch.Add(Prefix + line);
-                docIdsBatch.Add($"q_{count}");
+                docIdsBatch.Add(count);
 
                 ++count;
                 if (paragraphsBatch.Count < 128)
@@ -98,23 +96,22 @@ static class Program
         await Task.WhenAll(tasks);
         Console.WriteLine($"Processed {count} queries, {count / timer.Elapsed.TotalSeconds} q/s");
 
-        async Task Process(string[] docIds, string[] paragraphs)
+        async Task Process(int[] queryIds, string[] paragraphs)
         {
             var task = embeddingGenerator.GenerateAsync(paragraphs);
             var points = new PointStruct[paragraphs.Length];
-            var id = Interlocked.Add(ref _pointId, (ulong)paragraphs.Length);
             var embeddings = await task;
             var index = 0;
-            foreach (var docId in docIds)
+            foreach (var queryId in queryIds)
             {
                 points[index] = new()
                 {
-                    Id = --id,
+                    Id = 10_000_000_000UL + (ulong)queryId,
                     Vectors = embeddings[index].Vector.ToArray(),
                     Payload =
                     {
                         ["text"] = paragraphs[index].Substring(Prefix.Length),
-                        ["queryId"] = docId,
+                        ["queryId"] = queryId,
                     }
                 };
                 ++index;
