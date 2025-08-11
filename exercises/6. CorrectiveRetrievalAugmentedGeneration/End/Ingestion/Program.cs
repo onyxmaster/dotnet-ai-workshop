@@ -145,7 +145,7 @@ static class Program
                     var content = prefix + "\n" + string.Join("\n", pageLines);
                     for (var i = 0; i < paragraphs.Count; i++)
                     {
-                        docIdsBatch.Add((docId, prefix));
+                        docIdsBatch.Add((docId, content));
                     }
                 }
                 else
