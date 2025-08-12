@@ -58,7 +58,7 @@ static class Program
         var docIdsBatch = new List<int>();
         var paragraphsBatch = new List<string>();
         var timer = Stopwatch.StartNew();
-        foreach (var filePath in Directory.EnumerateFiles(dir, "*.csv"))
+        foreach (var filePath in Directory.EnumerateFiles(dir, "DoubleChecked.csv"))
         {
             var bytePool = ArrayPool<byte>.Shared;
             var charPool = ArrayPool<char>.Shared;
