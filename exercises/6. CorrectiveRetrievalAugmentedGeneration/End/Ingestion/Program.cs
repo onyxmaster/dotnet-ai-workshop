@@ -128,7 +128,6 @@ static class Program
                 }
 
                 ++count;
-                var chunkHeader = Prefix + prefix + "\n";
                 if (content.Length != 0)
                 {
                     // BlingFireUtils isn't too good at sampling
@@ -137,12 +136,6 @@ static class Program
                     var lines = TextChunker.SplitPlainTextLines(contentString, adjustedContextLength, tokenCounter: xlmrTokenCounter);
                     var chunkHeader = Prefix + prefix + "\n";
                     var paragraphs = TextChunker.SplitPlainTextParagraphs(lines, adjustedContextLength, ContextLength / 8, chunkHeader: chunkHeader, tokenCounter: xlmrTokenCounter);
-
-                    // SplitPlainTextParagraphs has a bug that merges paragraphs that are too long, so we need to check if any paragraph exceeds the adjusted context length
-                    if (paragraphs.Any(p => p.Length > adjustedContextLength && xlmrTokenCounter(p) > adjustedContextLength))
-                    {
-                        paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 4, chunkHeader: chunkHeader, tokenCounter: xlmrTokenCounter);
-                    }
 
                     paragraphsBatch.AddRange(paragraphs);
                     contentString = prefix + "\n" + contentString;
@@ -190,16 +183,7 @@ static class Program
             var task = embeddingGenerator.GenerateAsync(paragraphs);
             var points = new PointStruct[paragraphs.Length];
             var id = Interlocked.Add(ref _pointId, (ulong)paragraphs.Length);
-            GeneratedEmbeddings<Embedding<float>> embeddings;
-            try
-            {
-                embeddings = await task;
-            }
-            catch
-            {
-                Console.Error.WriteLine("Failure detected.");
-                return;
-            }
+            var embeddings = await task;
 
             var index = 0;
             foreach (var (docId, content) in docIds)
