@@ -59,7 +59,7 @@ static class Program
         var tasks = new List<Task>(Parallelism);
         var count = 0;
         var chunkCount = 0;
-        var pageLines = new List<string>();
+        var content = new StringBuilder();
         var docIdsBatch = new List<(string, string)>();
         var paragraphsBatch = new List<string>();
         var lengthBuffer = new byte[4];
@@ -88,7 +88,7 @@ static class Program
                 var contentLength = Encoding.UTF8.GetChars(contentSpan, charBuffer);
                 bytePool.Return(contentBuffer);
 
-                pageLines.Clear();
+                content.Clear();
                 string? docId = null;
                 string? prefix = null;
                 var text = charBuffer.AsSpan(0, contentLength);
@@ -97,24 +97,24 @@ static class Program
                     int idx = text.IndexOf('\n');
                     if (idx == -1)
                     {
-                        pageLines.Add(text.ToString());
+                        content.Append(text.ToString());
                         break;
                     }
 
                     if (idx != 0)
                     {
-                        var line = text.Slice(0, idx).ToString();
+                        var line = text.Slice(0, idx);
                         if (docId is null)
                         {
-                            docId = line;
+                            docId = line.ToString();
                         }
                         else if (prefix is null)
                         {
-                            prefix = line;
+                            prefix = line.ToString();
                         }
                         else
                         {
-                            pageLines.Add(line);
+                            content.Append(line);
                         }
                     }
 
@@ -129,11 +129,14 @@ static class Program
 
                 ++count;
                 var chunkHeader = Prefix + prefix + "\n";
-                if (pageLines.Count != 0)
+                if (content.Length != 0)
                 {
                     // BlingFireUtils isn't too good at sampling
                     var adjustedContextLength = ContextLength * 8 / 9;
-                    var paragraphs = TextChunker.SplitPlainTextParagraphs(pageLines, adjustedContextLength, ContextLength / 8, chunkHeader: chunkHeader, tokenCounter: xlmrTokenCounter);
+                    var contentString = content.ToString();
+                    var lines = TextChunker.SplitPlainTextLines(contentString, adjustedContextLength, tokenCounter: xlmrTokenCounter);
+                    var chunkHeader = Prefix + prefix + "\n";
+                    var paragraphs = TextChunker.SplitPlainTextParagraphs(lines, adjustedContextLength, ContextLength / 8, chunkHeader: chunkHeader, tokenCounter: xlmrTokenCounter);
 
                     // SplitPlainTextParagraphs has a bug that merges paragraphs that are too long, so we need to check if any paragraph exceeds the adjusted context length
                     if (paragraphs.Any(p => p.Length > adjustedContextLength && xlmrTokenCounter(p) > adjustedContextLength))
@@ -142,15 +145,15 @@ static class Program
                     }
 
                     paragraphsBatch.AddRange(paragraphs);
-                    var content = prefix + "\n" + string.Join("\n", pageLines);
+                    contentString = prefix + "\n" + contentString;
                     for (var i = 0; i < paragraphs.Count; i++)
                     {
-                        docIdsBatch.Add((docId, content));
+                        docIdsBatch.Add((docId, contentString));
                     }
                 }
                 else
                 {
-                    paragraphsBatch.Add(chunkHeader);
+                    paragraphsBatch.Add(Prefix + prefix);
                     docIdsBatch.Add((docId, prefix));
                 }
 
