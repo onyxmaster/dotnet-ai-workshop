@@ -14,7 +14,7 @@ static class Program
     static async Task Main()
     {
         // - Qdrant in Docker (e.g., `docker run -p 6333:6333 -p 6334:6334 -v qdrant_storage:/qdrant/storage:z -d qdrant/qdrant`)
-        var tokenizer = BlingFireUtils.LoadModel("./xlm_roberta_base.bin");
+        var tokenizer = BlingFireUtils2.LoadModel("./xlm_roberta_base.bin");
         TextChunker.TokenCounter xlmrTokenCounter = (string text) =>
         {
             if (string.IsNullOrEmpty(text))
@@ -23,11 +23,14 @@ static class Program
             }
 
             var bytesPool = ArrayPool<byte>.Shared;
+
+            //FIXME: stackalloc for small documents
             var textBytes = bytesPool.Rent(text.Length * 4);
             var length = Encoding.UTF8.GetBytes(text, textBytes);
             var idsPool = ArrayPool<int>.Shared;
+            //FIXME: stackalloc for small documents
             var tokenIds = idsPool.Rent(length);
-            int count = BlingFireUtils.TextToIds(
+            int count = BlingFireUtils2.TextToIds(
                 tokenizer,
                 textBytes,
                 length,
